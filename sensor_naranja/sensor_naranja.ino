@@ -1,55 +1,31 @@
 #include "esp_camera.h"
 #include "board_config.h"
 
-// Función para convertir RGB565 a HSV y detectar naranja
-bool isOrange(uint16_t rgb565) {
-  // 1. Extraer canales RGB (RGB565 a RGB888)
-  uint8_t r = (rgb565 & 0xF800) >> 8;
-  uint8_t g = (rgb565 & 0x07E0) >> 3;
-  uint8_t b = (rgb565 & 0x001F) << 3;
+// =======================================================
+// CONFIGURACIÓN DE PINES BTS7960 (100% SEGUROS)
+// =======================================================
+#define PIN_IZQ_ADELANTE 1  // RPWM Motor Izquierdo
+#define PIN_IZQ_ATRAS    2  // LPWM Motor Izquierdo
+#define PIN_DER_ADELANTE 3  // RPWM Motor Derecho
+#define PIN_DER_ATRAS    14 // LPWM Motor Derecho
 
-  // 2. Convertir a rangos de 0 a 1 para cálculos
-  float fr = r / 255.0;
-  float fg = g / 255.0;
-  float fb = b / 255.0;
-
-  float cmax = max(fr, max(fg, fb));
-  float cmin = min(fr, min(fg, fb));
-  float diff = cmax - cmin;
-
-  float h = 0, s = 0, v = cmax;
-
-  // 3. Calcular Matiz (Hue)
-  if (diff == 0) {
-    h = 0;
-  } else if (cmax == fr) {
-    h = 60 * fmod(((fg - fb) / diff), 6);
-  } else if (cmax == fg) {
-    h = 60 * (((fb - fr) / diff) + 2);
-  } else if (cmax == fb) {
-    h = 60 * (((fr - fg) / diff) + 4);
-  }
-  if (h < 0) h += 360;
-
-  // 4. Calcular Saturación
-  if (cmax != 0) s = diff / cmax;
-
-  // 5. FILTRO NARANJA: Ajusta estos valores según tu iluminación
-  if (h >= 10 && h <= 45 && s >= 0.4 && v >= 0.4) {
-    return true; // Es un 1 en la matriz
-  }
-  return false; // Es un 0 en la matriz
-}
-
+// --- MEDIDOR DE FPS ---
+unsigned long tiempo_ultimo_fotograma = 0;
+// ----------------------
 void setup() {
   Serial.begin(115200);
-  
-  // TRUCO CLAVE: Esperar 3 segundos para que el PC abra el puerto USB
   delay(3000); 
   
   Serial.println("\n=========================================");
-  Serial.println("  INICIANDO SISTEMA DE VISIÓN BATTLEBOT  ");
+  Serial.println("  SISTEMA DE VISIÓN Y TRACCIÓN INICIADO  ");
   Serial.println("=========================================\n");
+
+  pinMode(PIN_IZQ_ADELANTE, OUTPUT);
+  pinMode(PIN_IZQ_ATRAS, OUTPUT);
+  pinMode(PIN_DER_ADELANTE, OUTPUT);
+  pinMode(PIN_DER_ATRAS, OUTPUT);
+  
+  moverMotores(0, 0);
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -65,71 +41,166 @@ void setup() {
   config.xclk_freq_hz = 20000000;
   
   config.pixel_format = PIXFORMAT_RGB565; 
-  config.frame_size = FRAMESIZE_QQVGA;    
+  config.frame_size = FRAMESIZE_QVGA; 
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.fb_count = 1;
 
   esp_err_t err = esp_camera_init(&config);
-  if (err != ESP_OK) {
-    Serial.printf("❌ Error de cámara: 0x%x\n", err);
-    return;
-  }
+  if (err != ESP_OK) return;
   
   sensor_t * s = esp_camera_sensor_get();
   s->set_vflip(s, 1);
-  
-  Serial.println("✅ Cámara lista. Empezando ciclo de rastreo...");
+  s->set_whitebal(s, 0);       
+  s->set_awb_gain(s, 0);       
+  s->set_saturation(s, 2);     
+  s->set_brightness(s, -1);    
+  s->set_contrast(s, 1);       
 }
 
-// Variable para controlar el tiempo del latido en la terminal
-unsigned long ultimoLatido = 0;
+// Función de control de potencia bruta
+void moverMotores(int velIzq, int velDer) {
+  velIzq = constrain(velIzq, -255, 255);
+  velDer = constrain(velDer, -255, 255);
 
-void loop() {
-  camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) {
-    Serial.println("Fallo al capturar fotograma");
-    delay(100);
-    return;
+  if (velIzq >= 0) {
+    analogWrite(PIN_IZQ_ADELANTE, velIzq);
+    analogWrite(PIN_IZQ_ATRAS, 0);
+  } else {
+    analogWrite(PIN_IZQ_ADELANTE, 0);
+    analogWrite(PIN_IZQ_ATRAS, abs(velIzq)); 
   }
 
-  long m00 = 0; 
-  long m10 = 0; 
-  long m01 = 0; 
+  if (velDer >= 0) {
+    analogWrite(PIN_DER_ADELANTE, velDer);
+    analogWrite(PIN_DER_ATRAS, 0);
+  } else {
+    analogWrite(PIN_DER_ADELANTE, 0);
+    analogWrite(PIN_DER_ATRAS, abs(velDer));
+  }
+}
+
+// Función de caza optimizada con ENTEROS (Ultra-rápida)
+// Aproximación de Fucsia/Magenta: Alto Rojo, Alto Azul, Bajo Verde
+// Función de caza optimizada con ENTEROS (Calibrada para pantalla)
+bool isTargetFast(uint8_t r, uint8_t g, uint8_t b) {
+  // 1. Brillo mínimo: la pantalla emite mucha luz (R y B altos)
+  if (r > 120 && b > 120) {
+    
+    // 2. Dominancia: Rojo y Azul deben superar al Verde.
+    // En la telemetría del móvil, el verde rondaba los 170 y el R/B los 230.
+    // Exigimos que el verde sea simplemente 25 puntos más bajo.
+    if (g < (r - 25) && g < (b - 25)) {
+      
+      // 3. Equilibrio: Rojo y azul deben ser similares para ser Fucsia
+      if (abs(r - b) < 60) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Variables globales simplificadas
+enum EstadoRobot {
+  ESTADO_BUSQUEDA,
+  ESTADO_ATAQUE
+};
+EstadoRobot estado_actual = ESTADO_BUSQUEDA;
+
+int ultima_X_conocida = 160; 
+
+const int CENTRO_CAMARA_X = 160; 
+const float Kp_CURVATURA = 1.2; 
+const int PWM_BASE_MAX = 255;   
+const int PWM_BUSQUEDA = 120;   
+
+void loop() {
+  unsigned long tiempo_inicio = millis();
+
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) return;
 
   uint16_t *pixels = (uint16_t *)fb->buf;
   int width = fb->width;
-  int height = fb->height;
-  int pixel_index = 0;
+  int limite_suelo = fb->height - 60; 
+  
+  long m00 = 0, m10 = 0, m01 = 0; 
 
-  for (int y = 0; y < height; y++) {
-    for (int x = 0; x < width; x++) {
-      uint16_t current_pixel = pixels[pixel_index];
+  // FASE 1: Binarización + Acreción + Momentos EN UNA SOLA PASADA
+  // Subsampling: Saltamos de 2 en 2 píxeles para ir 4 veces más rápido
+  for (int y = 0; y < limite_suelo; y += 2) {
+    for (int x = 0; x < width; x += 2) {
+      uint16_t raw_pixel = pixels[y * width + x];
+      uint16_t pixel_real = (raw_pixel >> 8) | (raw_pixel << 8);
       
-      if (isOrange(current_pixel)) {
-        m00 += 1;   
-        m10 += x;   
-        m01 += y;   
+      uint8_t r = (pixel_real & 0xF800) >> 8;
+      uint8_t g = (pixel_real & 0x07E0) >> 3;
+      uint8_t b = (pixel_real & 0x001F) << 3;
+      
+      if (isTargetFast(r, g, b)) {
+        // Al encontrar un acierto, inflamos el área (acreción virtual)
+        // Como saltamos de 2 en 2, cada acierto cuenta como 4 píxeles
+        m00 += 4;   
+        m10 += x * 4;   
+        m01 += y * 4;   
       }
-      pixel_index++;
     }
   }
 
-  // Si encuentra una mancha naranja sólida (más de 15 píxeles para ignorar ruido)
-  if (m00 > 15) {
+  // Medición de Rendimiento
+  unsigned long tiempo_fin = millis();
+  unsigned long tiempo_fotograma = tiempo_fin - tiempo_inicio;
+  float fps = 1000.0 / tiempo_fotograma;
+
+  Serial.println("\n--- TELEMETRÍA DE COMBATE ---");
+  Serial.printf("[SISTEMA] Rendimiento: %.1f FPS (%.0f ms por frame)\n", fps, (float)tiempo_fotograma);
+
+  // MFS Y NAVEGACIÓN
+  // Filtro adaptado al subsampling
+  if (m00 > 30) {
+    estado_actual = ESTADO_ATAQUE;
     int centro_x = m10 / m00;
-    int centro_y = m01 / m00;
+    ultima_X_conocida = centro_x; 
+
+    int error_x = centro_x - CENTRO_CAMARA_X;
+    float correccion_giro = error_x * Kp_CURVATURA; 
+
+    int velocidad_ataque = PWM_BASE_MAX;
+    if (m00 > 2000) velocidad_ataque = 150; 
+    if (m00 > 5000) velocidad_ataque = 0;   
+
+    int pwm_izq = velocidad_ataque + correccion_giro;
+    int pwm_der = velocidad_ataque - correccion_giro;
     
-    // Imprime la detección de forma limpia y clara
-    Serial.printf("\r[!] OBJETIVO FIJADO -> X: %d, Y: %d | Area: %ld      \n", centro_x, centro_y, m00);
+    moverMotores(pwm_izq, pwm_der);
+
+    Serial.printf("[ATAQUE] X:%d | Area:%ld | L:%d R:%d\n", centro_x, m00, pwm_izq, pwm_der);
+    
   } else {
-    // Si no ve nada, imprime un latido (un punto) cada 500ms
-    if (millis() - ultimoLatido > 500) {
-      Serial.print(".");
-      ultimoLatido = millis();
+    estado_actual = ESTADO_BUSQUEDA;
+
+    int pwm_izq = 0;
+    int pwm_der = 0;
+    
+    if (ultima_X_conocida < CENTRO_CAMARA_X - 20) {
+      pwm_izq = -PWM_BUSQUEDA; 
+      pwm_der = PWM_BUSQUEDA;  
+      Serial.println("[BUSQUEDA] Rotando a la IZQUIERDA");
+      
+    } else if (ultima_X_conocida > CENTRO_CAMARA_X + 20) {
+      pwm_izq = PWM_BUSQUEDA;  
+      pwm_der = -PWM_BUSQUEDA; 
+      Serial.println("[BUSQUEDA] Rotando a la DERECHA");
+      
+    } else {
+      pwm_izq = PWM_BUSQUEDA;
+      pwm_der = -PWM_BUSQUEDA;
+      Serial.println("[BUSQUEDA] Rotando a la DERECHA (Default)");
     }
+
+    moverMotores(pwm_izq, pwm_der);
   }
 
   esp_camera_fb_return(fb); 
-  delay(30); // Pausa táctica de 30ms para trabajar a unos 30 FPS estables
 }
