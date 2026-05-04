@@ -1,53 +1,35 @@
 #include "esp_camera.h"
 #include "board_config.h"
-#include <WiFi.h>
+#include <ESP32Servo.h> // LIBRERÍA DE SERVOS
+
 // =======================================================
-// CONFIGURACIÓN DE PINES BTS7960 (100% SEGUROS)
+// CONFIGURACIÓN DE PINES PARA SERVOS (MODO PRUEBA)
 // =======================================================
-#define PIN_IZQ_ADELANTE 1  // RPWM Motor Izquierdo
-#define PIN_IZQ_ATRAS    2  // LPWM Motor Izquierdo
-#define PIN_DER_ADELANTE 3  // RPWM Motor Derecho
-#define PIN_DER_ATRAS    14 // LPWM Motor Derecho
+#define PIN_SERVO_IZQ 3  // Señal Servo Izquierdo
+#define PIN_SERVO_DER 14 // Señal Servo Derecho
+
+Servo servoIzq;
+Servo servoDer;
 
 // --- MEDIDOR DE FPS ---
 unsigned long tiempo_ultimo_fotograma = 0;
 // ----------------------
 
-// ----- credenciales punto WIFI -------
-const char* ssid = "Battlebot_CAM";
-const char* password = "12345678";
-
 void setup() {
   Serial.begin(115200);
   delay(3000); 
-
-  //---- creacion punto   wifi----- 
-  WiFi.mode(WIFI_AP);
-  WiFi.setSleep(false);
-
-  bool ap_ok = WiFi.softAP(ssid, password);
-
-  if (ap_ok) {
-    Serial.println("Punto WiFi creado correctamente");
-    Serial.print("SSID: ");
-    Serial.println(ssid);
-    Serial.print("IP del AP: ");
-    Serial.println(WiFi.softAPIP());
-  } else {
-    Serial.println("ERROR: no se pudo crear el punto WiFi");
-  }
-
   
   Serial.println("\n=========================================");
-  Serial.println("  SISTEMA DE VISIÓN Y TRACCIÓN INICIADO  ");
+  Serial.println("  SISTEMA DE VISIÓN (MODO PRUEBA SERVOS) ");
   Serial.println("=========================================\n");
 
-  pinMode(PIN_IZQ_ADELANTE, OUTPUT);
-  pinMode(PIN_IZQ_ATRAS, OUTPUT);
-  pinMode(PIN_DER_ADELANTE, OUTPUT);
-  pinMode(PIN_DER_ATRAS, OUTPUT);
+  // Asignar los pines a los objetos Servo
+  servoIzq.attach(PIN_SERVO_IZQ);
+  servoDer.attach(PIN_SERVO_DER);
   
-  moverMotores(0, 0);
+  // Ponerlos en posición neutral (90 grados / parados) al arrancar
+  servoIzq.write(90);
+  servoDer.write(90);
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -80,40 +62,31 @@ void setup() {
   s->set_contrast(s, 1);       
 }
 
-// Función de control de potencia bruta
+// Función de control adaptada para Servos
+// Traduce el PWM bruto (-255 a 255) a grados de servo (0 a 180)
 void moverMotores(int velIzq, int velDer) {
+  // 1. Blindaje matemático (-255 a 255)
   velIzq = constrain(velIzq, -255, 255);
   velDer = constrain(velDer, -255, 255);
 
-  if (velIzq >= 0) {
-    analogWrite(PIN_IZQ_ADELANTE, velIzq);
-    analogWrite(PIN_IZQ_ATRAS, 0);
-  } else {
-    analogWrite(PIN_IZQ_ADELANTE, 0);
-    analogWrite(PIN_IZQ_ATRAS, abs(velIzq)); 
-  }
+  // 2. Mapeo a grados (0 a 180)
+  // -255 = 0 grados (Marcha atrás máxima)
+  // 0    = 90 grados (Parado)
+  // 255  = 180 grados (Marcha adelante máxima)
+  int anguloIzq = map(velIzq, -255, 255, 0, 180);
+  int anguloDer = map(velDer, -255, 255, 0, 180);
 
-  if (velDer >= 0) {
-    analogWrite(PIN_DER_ADELANTE, velDer);
-    analogWrite(PIN_DER_ATRAS, 0);
-  } else {
-    analogWrite(PIN_DER_ADELANTE, 0);
-    analogWrite(PIN_DER_ATRAS, abs(velDer));
-  }
+  // 3. Enviar la señal física a los servos
+  servoIzq.write(anguloIzq);
+  servoDer.write(anguloDer);
 }
 
-// Función de caza optimizada con ENTEROS (Ultra-rápida)
-// Aproximación de Fucsia/Magenta: Alto Rojo, Alto Azul, Bajo Verde
 // Función de caza optimizada con ENTEROS (Calibrada para pantalla)
 bool isTargetFast(uint8_t r, uint8_t g, uint8_t b) {
   // 1. Brillo mínimo: la pantalla emite mucha luz (R y B altos)
   if (r > 120 && b > 120) {
-    
     // 2. Dominancia: Rojo y Azul deben superar al Verde.
-    // En la telemetría del móvil, el verde rondaba los 170 y el R/B los 230.
-    // Exigimos que el verde sea simplemente 25 puntos más bajo.
     if (g < (r - 25) && g < (b - 25)) {
-      
       // 3. Equilibrio: Rojo y azul deben ser similares para ser Fucsia
       if (abs(r - b) < 60) {
         return true;
@@ -150,7 +123,6 @@ void loop() {
   long m00 = 0, m10 = 0, m01 = 0; 
 
   // FASE 1: Binarización + Acreción + Momentos EN UNA SOLA PASADA
-  // Subsampling: Saltamos de 2 en 2 píxeles para ir 4 veces más rápido
   for (int y = 0; y < limite_suelo; y += 2) {
     for (int x = 0; x < width; x += 2) {
       uint16_t raw_pixel = pixels[y * width + x];
@@ -161,8 +133,6 @@ void loop() {
       uint8_t b = (pixel_real & 0x001F) << 3;
       
       if (isTargetFast(r, g, b)) {
-        // Al encontrar un acierto, inflamos el área (acreción virtual)
-        // Como saltamos de 2 en 2, cada acierto cuenta como 4 píxeles
         m00 += 4;   
         m10 += x * 4;   
         m01 += y * 4;   
@@ -179,7 +149,6 @@ void loop() {
   Serial.printf("[SISTEMA] Rendimiento: %.1f FPS (%.0f ms por frame)\n", fps, (float)tiempo_fotograma);
 
   // MFS Y NAVEGACIÓN
-  // Filtro adaptado al subsampling
   if (m00 > 30) {
     estado_actual = ESTADO_ATAQUE;
     int centro_x = m10 / m00;
