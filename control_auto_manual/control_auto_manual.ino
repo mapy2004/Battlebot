@@ -13,6 +13,8 @@
 #define PIN_DER_ATRAS    14 // LPWM Motor Derecho
 #define PIN_SIERRA_ADELANTE 6  // RPWM SIERRA
 #define PIN_SIERRA_ATRAS    7   // LPWM SIERRA
+#define PIN_SIERRA_REN  4 // Right enable sierra
+#define PIN_SIERRA_LEN  5 // left enable sierra
 
 // --- MEDIDOR DE FPS ---
 unsigned long tiempo_ultimo_fotograma = 0;
@@ -78,6 +80,19 @@ void setup() {
   Serial.println("Esperando mando Xbox...");
  // --------------------------------------------------------
   
+  // ------ configuracion SIERRA --------------------------
+  pinMode(PIN_SIERRA_ADELANTE, OUTPUT);
+pinMode(PIN_SIERRA_ATRAS, OUTPUT);
+
+pinMode(PIN_SIERRA_REN, OUTPUT);
+pinMode(PIN_SIERRA_LEN, OUTPUT);
+
+// habilitar driver
+digitalWrite(PIN_SIERRA_REN, HIGH);
+digitalWrite(PIN_SIERRA_LEN, HIGH);
+
+moverSierra(0);
+//--------------------------------------------------------
 
 
   // ----- configuracion e inicializacion pines motores y camara ----------------
@@ -219,23 +234,23 @@ if (mando && mando->isConnected()) {
 
 
     // comprobacion
-    Serial.print("X: ");
-    Serial.print(joystickX);
+   // Serial.print("X: ");
+   // Serial.print(joystickX);
 
-    Serial.print("  Y: ");
-    Serial.print(joystickY);
+    //Serial.print("  Y: ");
+    //Serial.print(joystickY);
 
-    Serial.print("  A: ");
-    Serial.print(botonA);
+    //Serial.print("  A: ");
+    //Serial.print(botonA);
 
-    Serial.print("  B: ");
-    Serial.println(botonB);
+    //Serial.print("  B: ");
+    //Serial.println(botonB);
 
-    Serial.print("  gatillo derecho: ");
-    Serial.println(gatilloDer);
+    //Serial.print("  gatillo derecho: ");
+    //Serial.println(gatilloDer);
 
-    Serial.print("  gatillo izquierdo: ");
-    Serial.println(gatilloIzq);
+    //Serial.print("  gatillo izquierdo: ");
+    //Serial.println(gatilloIzq);
 
 
   }else {
@@ -251,7 +266,6 @@ if (mando && mando->isConnected()) {
     botonX = false;
     botonY = false;
 }
-
 }
 // ========================================================
 
@@ -330,6 +344,10 @@ const int PWM_BASE_MAX = 255;
 const int PWM_BUSQUEDA = 120;   
 
 void loop() {
+  //if (modo_actual == MODO_MANUAL) {
+  //BP32.update();
+  //leerMando();
+  //}
   BP32.update();
   leerMando(); //  lectura mando bluetooth 
   actualizarModo(); // cambiar modo funcionamiento
@@ -344,11 +362,13 @@ void loop() {
     ModoManual();
     break;
   }
-  delay(5); // pequeño delay para no saturar el loop
+  delay(100); // pequeño delay para no saturar el loop
 }
 
 //======= funcion modo manual ============================
 void ModoManual(){
+
+  Serial.println("Entrando en modo manual");
   int avance = joystickY;
   int giro   = joystickX;
 
@@ -367,10 +387,16 @@ void ModoManual(){
 
 // ======= funcion del modo automatico ============================
 void ModoAutomatico(){
+
+    Serial.println("Entrando en ModoAutomatico");
   unsigned long tiempo_inicio = millis();
 // --------- lectura color camara -------------
   camera_fb_t *fb = esp_camera_fb_get();
-  if (!fb) return;
+    if (!fb) {
+    Serial.println("ERROR: no se pudo capturar frame de camara");
+    return;
+  }
+  Serial.println("Frame capturado correctamente");
 
   uint16_t *pixels = (uint16_t *)fb->buf;
   int width = fb->width;
