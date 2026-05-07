@@ -1,13 +1,17 @@
 #include "esp_camera.h"
 #include "board_config.h"
 #include <WiFi.h>
+
 // =======================================================
-// CONFIGURACIÓN DE PINES BTS7960 (100% SEGUROS)
+// CONFIGURACIÓN DE PINES MOTORES (2x DRV8871)
 // =======================================================
-#define PIN_IZQ_ADELANTE 1  // RPWM Motor Izquierdo
-#define PIN_IZQ_ATRAS    2  // LPWM Motor Izquierdo
-#define PIN_DER_ADELANTE 3  // RPWM Motor Derecho
-#define PIN_DER_ATRAS    14 // LPWM Motor Derecho
+// Rueda Izquierda (DRV8871)
+#define PIN_IZQ_IN1 1       // IN1 DRV8871 (Motor Izquierdo)
+#define PIN_IZQ_IN2 2       // IN2 DRV8871 (Motor Izquierdo)
+
+// Rueda Derecha (DRV8871)
+#define PIN_DER_IN1 3       // IN1 DRV8871 (Motor Derecho)
+#define PIN_DER_IN2 47      // <-- ¡CAMBIO AQUÍ! (Era el 14, ahora es el 47 para evitar conflicto con la cámara)
 
 // --- MEDIDOR DE FPS ---
 unsigned long tiempo_ultimo_fotograma = 0;
@@ -37,15 +41,15 @@ void setup() {
     Serial.println("ERROR: no se pudo crear el punto WiFi");
   }
 
-  
   Serial.println("\n=========================================");
   Serial.println("  SISTEMA DE VISIÓN Y TRACCIÓN INICIADO  ");
   Serial.println("=========================================\n");
 
-  pinMode(PIN_IZQ_ADELANTE, OUTPUT);
-  pinMode(PIN_IZQ_ATRAS, OUTPUT);
-  pinMode(PIN_DER_ADELANTE, OUTPUT);
-  pinMode(PIN_DER_ATRAS, OUTPUT);
+  // Inicializar pines de motores como salidas
+  pinMode(PIN_IZQ_IN1, OUTPUT);
+  pinMode(PIN_IZQ_IN2, OUTPUT);
+  pinMode(PIN_DER_IN1, OUTPUT);
+  pinMode(PIN_DER_IN2, OUTPUT);
   
   moverMotores(0, 0);
 
@@ -80,41 +84,34 @@ void setup() {
   s->set_contrast(s, 1);       
 }
 
-// Función de control de potencia bruta
+// Función de control de potencia bruta adaptada para 2x DRV8871
 void moverMotores(int velIzq, int velDer) {
   velIzq = constrain(velIzq, -255, 255);
   velDer = constrain(velDer, -255, 255);
 
+  // Control Rueda Izquierda (DRV8871)
   if (velIzq >= 0) {
-    analogWrite(PIN_IZQ_ADELANTE, velIzq);
-    analogWrite(PIN_IZQ_ATRAS, 0);
+    analogWrite(PIN_IZQ_IN1, velIzq);
+    analogWrite(PIN_IZQ_IN2, 0);
   } else {
-    analogWrite(PIN_IZQ_ADELANTE, 0);
-    analogWrite(PIN_IZQ_ATRAS, abs(velIzq)); 
+    analogWrite(PIN_IZQ_IN1, 0);
+    analogWrite(PIN_IZQ_IN2, abs(velIzq)); 
   }
 
+  // Control Rueda Derecha (DRV8871) - Lógica original restaurada
   if (velDer >= 0) {
-    analogWrite(PIN_DER_ADELANTE, velDer);
-    analogWrite(PIN_DER_ATRAS, 0);
+    analogWrite(PIN_DER_IN1, velDer);
+    analogWrite(PIN_DER_IN2, 0);
   } else {
-    analogWrite(PIN_DER_ADELANTE, 0);
-    analogWrite(PIN_DER_ATRAS, abs(velDer));
+    analogWrite(PIN_DER_IN1, 0);
+    analogWrite(PIN_DER_IN2, abs(velDer)); // <-- Esto usará el Pin 47 ahora
   }
 }
 
-// Función de caza optimizada con ENTEROS (Ultra-rápida)
-// Aproximación de Fucsia/Magenta: Alto Rojo, Alto Azul, Bajo Verde
 // Función de caza optimizada con ENTEROS (Calibrada para pantalla)
 bool isTargetFast(uint8_t r, uint8_t g, uint8_t b) {
-  // 1. Brillo mínimo: la pantalla emite mucha luz (R y B altos)
   if (r > 120 && b > 120) {
-    
-    // 2. Dominancia: Rojo y Azul deben superar al Verde.
-    // En la telemetría del móvil, el verde rondaba los 170 y el R/B los 230.
-    // Exigimos que el verde sea simplemente 25 puntos más bajo.
     if (g < (r - 25) && g < (b - 25)) {
-      
-      // 3. Equilibrio: Rojo y azul deben ser similares para ser Fucsia
       if (abs(r - b) < 60) {
         return true;
       }
@@ -150,7 +147,6 @@ void loop() {
   long m00 = 0, m10 = 0, m01 = 0; 
 
   // FASE 1: Binarización + Acreción + Momentos EN UNA SOLA PASADA
-  // Subsampling: Saltamos de 2 en 2 píxeles para ir 4 veces más rápido
   for (int y = 0; y < limite_suelo; y += 2) {
     for (int x = 0; x < width; x += 2) {
       uint16_t raw_pixel = pixels[y * width + x];
@@ -161,8 +157,6 @@ void loop() {
       uint8_t b = (pixel_real & 0x001F) << 3;
       
       if (isTargetFast(r, g, b)) {
-        // Al encontrar un acierto, inflamos el área (acreción virtual)
-        // Como saltamos de 2 en 2, cada acierto cuenta como 4 píxeles
         m00 += 4;   
         m10 += x * 4;   
         m01 += y * 4;   
@@ -179,7 +173,6 @@ void loop() {
   Serial.printf("[SISTEMA] Rendimiento: %.1f FPS (%.0f ms por frame)\n", fps, (float)tiempo_fotograma);
 
   // MFS Y NAVEGACIÓN
-  // Filtro adaptado al subsampling
   if (m00 > 30) {
     estado_actual = ESTADO_ATAQUE;
     int centro_x = m10 / m00;
@@ -188,9 +181,8 @@ void loop() {
     int error_x = centro_x - CENTRO_CAMARA_X;
     float correccion_giro = error_x * Kp_CURVATURA; 
 
-    int velocidad_ataque = PWM_BASE_MAX;
-    if (m00 > 2000) velocidad_ataque = 150; 
-    if (m00 > 5000) velocidad_ataque = 0;   
+    // ATAQUE MÁXIMO SIEMPRE (Freno de proximidad eliminado)
+    int velocidad_ataque = PWM_BASE_MAX; 
 
     int pwm_izq = velocidad_ataque + correccion_giro;
     int pwm_der = velocidad_ataque - correccion_giro;
