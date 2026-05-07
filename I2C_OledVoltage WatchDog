@@ -1,0 +1,87 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 32
+#define OLED_RESET    -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+unsigned long Vm_startMillis = 0;  //some global variables available anywhere in the program
+unsigned long Vm_currentMillis = 0;
+const unsigned long Vm_period = 1000;
+
+const int analogPin = 17;
+const float dividerRatio = 0.244; // Your measured ratio
+const float refVoltage = 3.3;     // Measure your 3V3 pin and update this for 100% accuracy
+
+
+
+void setup() {
+  Serial.begin(115200);
+
+  // Initialize OLED
+  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
+  }
+  
+  display.setRotation(2);
+  
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0,0);
+  display.println("Battery Monitor");
+  display.display();
+  delay(1000);
+}
+
+void loop() {
+  Vm_currentMillis = millis();  //get the current "time" (actually the number of milliseconds since the program started)
+  if (Vm_currentMillis - Vm_startMillis >= Vm_period)  //test whether the period has elapsed
+  {
+
+   Vm_startMillis = millis();
+  // 1. Calculate Voltage
+  int rawValue = analogRead(analogPin);
+  float pinVoltage = (rawValue / 4095.0) * refVoltage;
+  float batteryVoltage = pinVoltage / dividerRatio;
+
+  // 2. Update Display
+  display.clearDisplay();
+  
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("LIPO VOLTAGE:");
+
+  display.setTextSize(2);
+  display.setCursor(0, 15);
+
+  // --- Leading Zero Logic ---
+  if (batteryVoltage < 10.0) {
+    display.print("0"); // Add the "padding" zero
+  }
+  
+  if (batteryVoltage > 0.1){
+  display.print(batteryVoltage, 2); 
+  display.print(" V");}
+  else {
+    display.print("0.00 V");
+  }
+
+  // --- Low Battery Warning ---
+  if (batteryVoltage < 11.0) {
+    display.setTextSize(2);     // Switch to small text so it fits on the side
+    display.print("!!!"); 
+    display.invertDisplay(true);     // Add the warning signs
+  }
+  else {
+    display.invertDisplay(false);
+  }
+  display.display();
+  
+  }
+}
