@@ -10,11 +10,23 @@
 #define PIN_IZQ_ADELANTE 1  // RPWM Motor Izquierdo
 #define PIN_IZQ_ATRAS    2  // LPWM Motor Izquierdo
 #define PIN_DER_ADELANTE 3  // RPWM Motor Derecho
-#define PIN_DER_ATRAS    14 // LPWM Motor Derecho
+#define PIN_DER_ATRAS    47 // LPWM Motor Derecho
 #define PIN_SIERRA_ADELANTE 6  // RPWM SIERRA
 #define PIN_SIERRA_ATRAS    7   // LPWM SIERRA
 #define PIN_SIERRA_REN  4 // Right enable sierra
 #define PIN_SIERRA_LEN  5 // left enable sierra
+
+
+// Canales PWM reservados para motores y sierra
+#define CH_IZQ_ADELANTE     1
+#define CH_IZQ_ATRAS        2
+#define CH_DER_ADELANTE     3
+#define CH_DER_ATRAS        4
+#define CH_SIERRA_ADELANTE  5
+#define CH_SIERRA_ATRAS     6
+
+#define PWM_FREQ 20000
+#define PWM_RES  8
 
 // --- MEDIDOR DE FPS ---
 unsigned long tiempo_ultimo_fotograma = 0;
@@ -81,8 +93,11 @@ void setup() {
  // --------------------------------------------------------
   
   // ------ configuracion SIERRA --------------------------
-  pinMode(PIN_SIERRA_ADELANTE, OUTPUT);
-pinMode(PIN_SIERRA_ATRAS, OUTPUT);
+ledcSetup(CH_SIERRA_ADELANTE, PWM_FREQ, PWM_RES);
+ledcAttachPin(PIN_SIERRA_ADELANTE, CH_SIERRA_ADELANTE);
+
+ledcSetup(CH_SIERRA_ATRAS, PWM_FREQ, PWM_RES);
+ledcAttachPin(PIN_SIERRA_ATRAS, CH_SIERRA_ATRAS);
 
 pinMode(PIN_SIERRA_REN, OUTPUT);
 pinMode(PIN_SIERRA_LEN, OUTPUT);
@@ -100,10 +115,19 @@ moverSierra(0);
   Serial.println("  SISTEMA DE VISIÓN Y TRACCIÓN INICIADO  ");
   Serial.println("=========================================\n");
 
-  pinMode(PIN_IZQ_ADELANTE, OUTPUT);
-  pinMode(PIN_IZQ_ATRAS, OUTPUT);
-  pinMode(PIN_DER_ADELANTE, OUTPUT);
-  pinMode(PIN_DER_ATRAS, OUTPUT);
+  // Motor izquierdo
+  ledcSetup(CH_IZQ_ADELANTE, PWM_FREQ, PWM_RES);
+  ledcAttachPin(PIN_IZQ_ADELANTE, CH_IZQ_ADELANTE);
+
+  ledcSetup(CH_IZQ_ATRAS, PWM_FREQ, PWM_RES);
+  ledcAttachPin(PIN_IZQ_ATRAS, CH_IZQ_ATRAS);
+
+  // Motor derecho
+  ledcSetup(CH_DER_ADELANTE, PWM_FREQ, PWM_RES);
+  ledcAttachPin(PIN_DER_ADELANTE, CH_DER_ADELANTE);
+
+  ledcSetup(CH_DER_ATRAS, PWM_FREQ, PWM_RES);
+  ledcAttachPin(PIN_DER_ATRAS, CH_DER_ATRAS);
   
   moverMotores(0, 0);
 
@@ -131,11 +155,13 @@ moverSierra(0);
   
   sensor_t * s = esp_camera_sensor_get();
   s->set_vflip(s, 1);
-  s->set_whitebal(s, 0);       
-  s->set_awb_gain(s, 0);       
-  s->set_saturation(s, 2);     
+  
+  s->set_whitebal(s, 1);        
+  s->set_awb_gain(s, 1);        
+  s->set_saturation(s, 3);      
+
   s->set_brightness(s, -1);    
-  s->set_contrast(s, 1);  
+  s->set_contrast(s, 1); 
   //--------------------------------------------------------------     
 }
 
@@ -144,21 +170,23 @@ void moverMotores(int velIzq, int velDer) {
   velIzq = constrain(velIzq, -255, 255);
   velDer = constrain(velDer, -255, 255);
 
-  if (velIzq >= 0) {
-    analogWrite(PIN_IZQ_ADELANTE, velIzq);
-    analogWrite(PIN_IZQ_ATRAS, 0);
-  } else {
-    analogWrite(PIN_IZQ_ADELANTE, 0);
-    analogWrite(PIN_IZQ_ATRAS, abs(velIzq)); 
-  }
+  // IZQUIERDO
+    if (velIzq >= 0) {
+      ledcWrite(CH_IZQ_ADELANTE, velIzq);
+      ledcWrite(CH_IZQ_ATRAS, 0);
+    } else {
+      ledcWrite(CH_IZQ_ADELANTE, 0);
+      ledcWrite(CH_IZQ_ATRAS, abs(velIzq));
+    }
 
-  if (velDer >= 0) {
-    analogWrite(PIN_DER_ADELANTE, velDer);
-    analogWrite(PIN_DER_ATRAS, 0);
-  } else {
-    analogWrite(PIN_DER_ADELANTE, 0);
-    analogWrite(PIN_DER_ATRAS, abs(velDer));
-  }
+    // DERECHO
+    if (velDer >= 0) {
+      ledcWrite(CH_DER_ADELANTE, velDer);
+      ledcWrite(CH_DER_ATRAS, 0);
+    } else {
+      ledcWrite(CH_DER_ADELANTE, 0);
+      ledcWrite(CH_DER_ATRAS, abs(velDer));
+    }
 }
 // ==================================================================
 
@@ -167,8 +195,8 @@ void moverSierra(int potencia) { // potencia 0 al 255
 
   potencia = constrain(potencia, 0, 255); // limitar valor de potencia
 
-  analogWrite(PIN_SIERRA_ADELANTE, potencia);
-  analogWrite(PIN_SIERRA_ATRAS, 0);
+  ledcWrite(CH_SIERRA_ADELANTE, potencia);
+  ledcWrite(CH_SIERRA_ATRAS, 0);
 }
 //===================================================================
 
@@ -177,16 +205,16 @@ void moverSierra(int potencia) { // potencia 0 al 255
 // Aproximación de Fucsia/Magenta: Alto Rojo, Alto Azul, Bajo Verde
 // Función de caza optimizada con ENTEROS (Calibrada para pantalla)
 bool isTargetFast(uint8_t r, uint8_t g, uint8_t b) {
-  // 1. Brillo mínimo: la pantalla emite mucha luz (R y B altos)
-  if (r > 120 && b > 120) {
+  if (r > 80 && b > 50) { 
     
-    // 2. Dominancia: Rojo y Azul deben superar al Verde.
-    // En la telemetría del móvil, el verde rondaba los 170 y el R/B los 230.
-    // Exigimos que el verde sea simplemente 25 puntos más bajo.
-    if (g < (r - 25) && g < (b - 25)) {
+    // EL AJUSTE QUIRÚRGICO: 
+    // Subimos la exigencia del Azul sobre el Verde de +5 a +12. 
+    // La piel rosada tiene azul, pero rara vez supera al verde por más de 10 puntos.
+    // El bote fucsia lo superará fácilmente por 20 o 30.
+    if (b > (g + 12) && r > (g + 25)) {
       
-      // 3. Equilibrio: Rojo y azul deben ser similares para ser Fucsia
-      if (abs(r - b) < 60) {
+      // Cerramos un pelín el embudo de 100 a 85 para evitar rosas pálidos/carne
+      if (abs(r - b) < 85) {
         return true;
       }
     }
@@ -342,6 +370,7 @@ const int CENTRO_CAMARA_X = 160;
 const float Kp_CURVATURA = 1.2; 
 const int PWM_BASE_MAX = 255;   
 const int PWM_BUSQUEDA = 120;   
+const int AREA_MINIMA_ATAQUE = 250;  
 
 void loop() {
   //if (modo_actual == MODO_MANUAL) {
@@ -351,7 +380,7 @@ void loop() {
   BP32.update();
   leerMando(); //  lectura mando bluetooth 
   actualizarModo(); // cambiar modo funcionamiento
-  actualizarSierra(); // mover sierra
+  
   // --- FSM modos de funcionamiento -----
   switch(modo_actual){
     case MODO_AUTOMATICO:
@@ -362,6 +391,8 @@ void loop() {
     ModoManual();
     break;
   }
+
+  actualizarSierra(); // mover sierra
   delay(100); // pequeño delay para no saturar el loop
 }
 
@@ -439,7 +470,7 @@ void ModoAutomatico(){
 
   // MFS Y NAVEGACIÓN
   // Filtro adaptado al subsampling
-  if (m00 > 30) {
+ if (m00 > AREA_MINIMA_ATAQUE) {
     estado_actual = ESTADO_ATAQUE;
     int centro_x = m10 / m00;
     ultima_X_conocida = centro_x; 
@@ -448,8 +479,8 @@ void ModoAutomatico(){
     float correccion_giro = error_x * Kp_CURVATURA; 
 
     int velocidad_ataque = PWM_BASE_MAX;
-    if (m00 > 2000) velocidad_ataque = 150; 
-    if (m00 > 5000) velocidad_ataque = 0;   
+   // if (m00 > 2000) velocidad_ataque = 150; 
+   // if (m00 > 5000) velocidad_ataque = 0;   
 
     int pwm_izq = velocidad_ataque + correccion_giro;
     int pwm_der = velocidad_ataque - correccion_giro;
