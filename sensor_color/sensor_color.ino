@@ -11,7 +11,7 @@
 
 // Rueda Derecha (DRV8871)
 #define PIN_DER_IN1 3       // IN1 DRV8871 (Motor Derecho)
-#define PIN_DER_IN2 47      // <-- ¡CAMBIO AQUÍ! (Era el 14, ahora es el 47 para evitar conflicto con la cámara)
+#define PIN_DER_IN2 47      // IN2 DRV8871 (Motor Derecho)
 
 // --- MEDIDOR DE FPS ---
 unsigned long tiempo_ultimo_fotograma = 0;
@@ -77,19 +77,19 @@ void setup() {
   
   sensor_t * s = esp_camera_sensor_get();
   s->set_vflip(s, 1);
-  s->set_whitebal(s, 0);       
-  s->set_awb_gain(s, 0);       
-  s->set_saturation(s, 2);     
+  
+  s->set_whitebal(s, 1);        
+  s->set_awb_gain(s, 1);        
+  s->set_saturation(s, 3);      
+
   s->set_brightness(s, -1);    
   s->set_contrast(s, 1);       
 }
 
-// Función de control de potencia bruta adaptada para 2x DRV8871
 void moverMotores(int velIzq, int velDer) {
   velIzq = constrain(velIzq, -255, 255);
   velDer = constrain(velDer, -255, 255);
 
-  // Control Rueda Izquierda (DRV8871)
   if (velIzq >= 0) {
     analogWrite(PIN_IZQ_IN1, velIzq);
     analogWrite(PIN_IZQ_IN2, 0);
@@ -98,29 +98,37 @@ void moverMotores(int velIzq, int velDer) {
     analogWrite(PIN_IZQ_IN2, abs(velIzq)); 
   }
 
-  // Control Rueda Derecha (DRV8871) - Lógica original restaurada
   if (velDer >= 0) {
     analogWrite(PIN_DER_IN1, velDer);
     analogWrite(PIN_DER_IN2, 0);
   } else {
     analogWrite(PIN_DER_IN1, 0);
-    analogWrite(PIN_DER_IN2, abs(velDer)); // <-- Esto usará el Pin 47 ahora
+    analogWrite(PIN_DER_IN2, abs(velDer)); 
   }
 }
 
-// Función de caza optimizada con ENTEROS (Calibrada para pantalla)
+// ======================================================================
+// FÓRMULA DE CAZA: SINTONÍA FINA ANTI-PIEL ROSADA
+// ======================================================================
 bool isTargetFast(uint8_t r, uint8_t g, uint8_t b) {
-  if (r > 120 && b > 120) {
-    if (g < (r - 25) && g < (b - 25)) {
-      if (abs(r - b) < 60) {
+  if (r > 80 && b > 50) { 
+    
+    // EL AJUSTE QUIRÚRGICO: 
+    // Subimos la exigencia del Azul sobre el Verde de +5 a +12. 
+    // La piel rosada tiene azul, pero rara vez supera al verde por más de 10 puntos.
+    // El bote fucsia lo superará fácilmente por 20 o 30.
+    if (b > (g + 12) && r > (g + 25)) {
+      
+      // Cerramos un pelín el embudo de 100 a 85 para evitar rosas pálidos/carne
+      if (abs(r - b) < 85) {
         return true;
       }
     }
   }
   return false;
 }
+// ======================================================================
 
-// Variables globales simplificadas
 enum EstadoRobot {
   ESTADO_BUSQUEDA,
   ESTADO_ATAQUE
@@ -129,10 +137,15 @@ EstadoRobot estado_actual = ESTADO_BUSQUEDA;
 
 int ultima_X_conocida = 160; 
 
+// ======================================================================
+// PARÁMETROS TÁCTICOS
+// ======================================================================
 const int CENTRO_CAMARA_X = 160; 
 const float Kp_CURVATURA = 1.2; 
 const int PWM_BASE_MAX = 255;   
 const int PWM_BUSQUEDA = 120;   
+const int AREA_MINIMA_ATAQUE = 250; 
+// ======================================================================
 
 void loop() {
   unsigned long tiempo_inicio = millis();
@@ -146,7 +159,6 @@ void loop() {
   
   long m00 = 0, m10 = 0, m01 = 0; 
 
-  // FASE 1: Binarización + Acreción + Momentos EN UNA SOLA PASADA
   for (int y = 0; y < limite_suelo; y += 2) {
     for (int x = 0; x < width; x += 2) {
       uint16_t raw_pixel = pixels[y * width + x];
@@ -164,7 +176,6 @@ void loop() {
     }
   }
 
-  // Medición de Rendimiento
   unsigned long tiempo_fin = millis();
   unsigned long tiempo_fotograma = tiempo_fin - tiempo_inicio;
   float fps = 1000.0 / tiempo_fotograma;
@@ -172,8 +183,7 @@ void loop() {
   Serial.println("\n--- TELEMETRÍA DE COMBATE ---");
   Serial.printf("[SISTEMA] Rendimiento: %.1f FPS (%.0f ms por frame)\n", fps, (float)tiempo_fotograma);
 
-  // MFS Y NAVEGACIÓN
-  if (m00 > 30) {
+  if (m00 > AREA_MINIMA_ATAQUE) { 
     estado_actual = ESTADO_ATAQUE;
     int centro_x = m10 / m00;
     ultima_X_conocida = centro_x; 
@@ -181,7 +191,6 @@ void loop() {
     int error_x = centro_x - CENTRO_CAMARA_X;
     float correccion_giro = error_x * Kp_CURVATURA; 
 
-    // ATAQUE MÁXIMO SIEMPRE (Freno de proximidad eliminado)
     int velocidad_ataque = PWM_BASE_MAX; 
 
     int pwm_izq = velocidad_ataque + correccion_giro;
