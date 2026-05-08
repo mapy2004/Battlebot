@@ -9,8 +9,7 @@ Funcionalidades:
 El ESP32-S3-secundario tiene implementado el código de la carpeta "video_streaming".
 Funcionalidades:
 1) Video streaming: Se conecta al un punto WIFI (creado por un móvil) y crea un servidor web desde donde se puede ver la retrasmisión de video en tiempo real desde otro dispositivo móvil accediendo a la dirección: http://172.20.10.10
-2) Lectura de temperatura de motores y batería mostrados en un display.
-
+2) Lectura de temperatura de motores y voltaje y porcentaje de batería mostrados en un display.
 
 
 	
