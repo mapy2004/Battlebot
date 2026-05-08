@@ -13,7 +13,7 @@ unsigned long Vm_startMillis = 0;  //some global variables available anywhere in
 unsigned long Vm_currentMillis = 0;
 const unsigned long Vm_period = 1000;
 
-const int analogPin = 17;
+const int analogPin = 14;
 const float dividerRatio = 0.244; // Your measured ratio
 const float refVoltage = 3.3;     // Measure your 3V3 pin and update this for 100% accuracy
 
@@ -21,7 +21,6 @@ const float refVoltage = 3.3;     // Measure your 3V3 pin and update this for 10
 
 void setup() {
   Serial.begin(115200);
-
   // Initialize OLED
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println(F("SSD1306 allocation failed"));

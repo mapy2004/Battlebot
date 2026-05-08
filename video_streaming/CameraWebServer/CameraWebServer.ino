@@ -18,7 +18,7 @@ unsigned long Vm_startMillis = 0;  //some global variables available anywhere in
 unsigned long Vm_currentMillis = 0;
 const unsigned long Vm_period = 1000;
 
-const int analogPin = 4;
+const int analogPin = 14; // salida div resistivo bateria
 const float dividerRatio = 0.244; // Your measured ratio
 const float refVoltage = 3.3;     // Measure your 3V3 pin and update this for 100% accuracy
 
@@ -36,6 +36,17 @@ const char *password = "BELGICA931";
 
 void startCameraServer();
 void setupLedFlash();
+
+//======= funcion saca porcentaje bateria ================
+float getBatteryPercent(float batteryVoltage){
+  float cellVoltage = batteryVoltage / 3.0; // LiPo 3S
+
+  if (cellVoltage >= 4.20) return 100;
+  if (cellVoltage <= 3.30) return 0;
+
+  return (cellVoltage - 3.30) * 100.0 / (4.20 - 3.30);
+}
+//=========================================================
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
@@ -175,19 +186,29 @@ if (!WiFi.config(local_IP, gateway, subnet)) {
   Serial.println("' to connect");
 
   // --- incializacion pantalla 
+  Wire.begin(1, 2);   // SDA = GPIO1, SCL = GPIO2
+  Serial.println("pines I2C asignados");
  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
    Serial.println(F("SSD1306 allocation failed"));
-   for(;;); // Don't proceed, loop forever
+   while (true);
  }
- display.setRotation(2);
+  display.setRotation(2);
   
- display.clearDisplay();
- display.setTextSize(1);
- display.setTextColor(SSD1306_WHITE);
- display.setCursor(0,0);
- display.println("Battery Monitor");
- display.display();
- delay(1000);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0,0);
+  display.println("Battery Monitor");
+  display.display();
+
+  Serial.println("OLED OK");
+//---- atenuiacion ADC
+  analogReadResolution(12);
+  analogSetPinAttenuation(analogPin, ADC_11db);
+  pinMode(analogPin, INPUT);
+
+
+  delay(1000);
 
 }
 
@@ -199,42 +220,87 @@ void loop() {
 
    Vm_startMillis = millis();
   // 1. Calculate Voltage
-  int rawValue = analogRead(analogPin);
+  // hacer una media de las lecturas
+  long sum = 0;
+  for (int i = 0; i < 20; i++) {
+    sum += analogRead(analogPin);
+    delay(2);
+  }
+  int rawValue = sum / 20;
+  //int rawValue = analogRead(analogPin);
   float pinVoltage = (rawValue / 4095.0) * refVoltage;
   float batteryVoltage = pinVoltage / dividerRatio;
+  
+  float batteryPercent = getBatteryPercent(batteryVoltage);
+  Serial.print("rawValue = ");
+  Serial.print(rawValue);
+  Serial.print(" | pinVoltage = ");
+  Serial.print(pinVoltage);
+  Serial.print(" V | batteryVoltage = ");
+  Serial.print(batteryVoltage);
+  Serial.println(" V");
 
   // 2. Update Display
   display.clearDisplay();
-  
+
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.print("LIPO VOLTAGE:");
+  display.print("LIPO: ");
+  display.print(batteryVoltage, 2);
+  display.println(" V");
 
-  display.setTextSize(2);
-  display.setCursor(0, 15);
+  display.setCursor(0, 12);
+  display.print("Battery: ");
+  display.print(batteryPercent, 0);
+  display.println(" %");
 
-  // --- Leading Zero Logic ---
-  if (batteryVoltage < 10.0) {
-    display.print("0"); // Add the "padding" zero
-  }
-  
-  if (batteryVoltage > 0.1){
-  display.print(batteryVoltage, 2); 
-  display.print(" V");}
-  else {
-    display.print("0.00 V");
-  }
+  display.setTextSize(1);
+  display.setCursor(0, 24);
 
-  // --- Low Battery Warning ---
-  if (batteryVoltage < 11.0) {
-    display.setTextSize(2);     // Switch to small text so it fits on the side
-    display.print("!!!"); 
-    display.invertDisplay(true);     // Add the warning signs
-  }
-  else {
+  if (batteryVoltage < 10.8) {
+    display.print("LOW BATTERY!");
+    display.invertDisplay(true);
+  } else {
+    display.print("Status: OK");
     display.invertDisplay(false);
   }
+
   display.display();
   }
-   delay(10000); // lee los valores cada segundo
 }
+
+
+// ------ PRUEBA PANTALLA ---------
+// #include <Wire.h>
+// #include <Adafruit_GFX.h>
+// #include <Adafruit_SSD1306.h>
+
+// #define SCREEN_WIDTH 128
+// #define SCREEN_HEIGHT 32
+// #define OLED_RESET -1
+// #define SCREEN_ADDRESS 0x3C
+
+// Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// void setup() {
+//   Serial.begin(115200);
+
+//   Wire.begin(5, 6);  // SDA = GPIO5, SCL = GPIO6
+
+//   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+//     Serial.println("OLED no detectada");
+//     while (true);
+//   }
+
+//   display.clearDisplay();
+//   display.setTextSize(1);
+//   display.setTextColor(SSD1306_WHITE);
+//   display.setCursor(0, 0);
+//   display.println("TEST");
+//   display.println("CABRON");
+//   display.display();
+
+//   Serial.println("OLED OK");
+// }
+
+// void loop() {}
