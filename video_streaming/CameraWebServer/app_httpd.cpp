@@ -156,6 +156,7 @@ static size_t jpg_encode_stream(void *arg, size_t index, const void *data, size_
 }
 
 static esp_err_t capture_handler(httpd_req_t *req) {
+  Serial.println("DEBUG: Entrando en capture_handler");
   camera_fb_t *fb = NULL;
   esp_err_t res = ESP_OK;
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
@@ -163,19 +164,27 @@ static esp_err_t capture_handler(httpd_req_t *req) {
 #endif
 
 #if defined(LED_GPIO_NUM)
+  Serial.println("DEBUG: LED activado antes de capturar");
   enable_led(true);
   vTaskDelay(150 / portTICK_PERIOD_MS);  // The LED needs to be turned on ~150ms before the call to esp_camera_fb_get()
   fb = esp_camera_fb_get();              // or it won't be visible in the frame. A better way to do this is needed.
   enable_led(false);
 #else
+  Serial.println("DEBUG: Capturando frame sin LED");
   fb = esp_camera_fb_get();
 #endif
 
-  if (!fb) {
-    log_e("Camera capture failed");
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
-  }
+ if (!fb) {
+  Serial.println("ERROR: esp_camera_fb_get() devuelve NULL.");
+  httpd_resp_send_500(req);
+  delay(500);
+  return ESP_FAIL;
+}
+  Serial.println("DEBUG: Frame capturado correctamente");
+  Serial.print("DEBUG: fb->len = ");
+  Serial.println(fb->len);
+  Serial.print("DEBUG: fb->format = ");
+  Serial.println(fb->format);
 
   httpd_resp_set_type(req, "image/jpeg");
   httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=capture.jpg");
@@ -190,11 +199,13 @@ static esp_err_t capture_handler(httpd_req_t *req) {
   size_t fb_len = 0;
 #endif
   if (fb->format == PIXFORMAT_JPEG) {
+    Serial.println("DEBUG: Enviando JPEG directamente");
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
     fb_len = fb->len;
 #endif
     res = httpd_resp_send(req, (const char *)fb->buf, fb->len);
   } else {
+    Serial.println("DEBUG: Frame no es JPEG, convirtiendo a JPG");
     jpg_chunking_t jchunk = {req, 0};
     res = frame2jpg_cb(fb, 80, jpg_encode_stream, &jchunk) ? ESP_OK : ESP_FAIL;
     httpd_resp_send_chunk(req, NULL, 0);
@@ -203,6 +214,8 @@ static esp_err_t capture_handler(httpd_req_t *req) {
 #endif
   }
   esp_camera_fb_return(fb);
+  Serial.print("DEBUG: Resultado httpd_resp_send = ");
+  Serial.println(res);
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
   int64_t fr_end = esp_timer_get_time();
 #endif

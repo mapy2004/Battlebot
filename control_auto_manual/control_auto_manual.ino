@@ -68,24 +68,6 @@ void setup() {
   Serial.begin(115200);
   delay(3000); 
 
-  //---- creacion punto   wifi-------- 
-  WiFi.mode(WIFI_AP);
-  WiFi.setSleep(false);
-
-  bool ap_ok = WiFi.softAP(ssid, password);
-
-  if (ap_ok) {
-    Serial.println("Punto WiFi creado correctamente");
-    Serial.print("SSID: ");
-    Serial.println(ssid);
-    Serial.print("IP del AP: ");
-    Serial.println(WiFi.softAPIP());
-  } else {
-    Serial.println("ERROR: no se pudo crear el punto WiFi");
-  }
- // -------------------------------------------------------------
-
-
  // ------- creacion conexion bluetooth -------------------
    BP32.setup(&onConnectedController, &onDisconnectedController);
   BP32.forgetBluetoothKeys();   // útil al probar emparejamientos nuevos
@@ -399,7 +381,6 @@ void loop() {
 //======= funcion modo manual ============================
 void ModoManual(){
 
-  Serial.println("Entrando en modo manual");
   int avance = joystickY;
   int giro   = joystickX;
 

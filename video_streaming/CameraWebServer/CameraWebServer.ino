@@ -18,30 +18,30 @@ unsigned long Vm_startMillis = 0;  //some global variables available anywhere in
 unsigned long Vm_currentMillis = 0;
 const unsigned long Vm_period = 1000;
 
-const int analogPin = 17;
+const int analogPin = 4;
 const float dividerRatio = 0.244; // Your measured ratio
 const float refVoltage = 3.3;     // Measure your 3V3 pin and update this for 100% accuracy
 
-
+camera_config_t config;
 
 // ===========================
 // Enter your WiFi credentials
 // ===========================
-//const char *ssid = "iPhone de Lucaasduck ";
-//const char *password = "BELGICA931";
 
-const char *ssid = "Battlebot_CAM";
-const char *password = "12345678";
+const char *ssid = "iphone_de_lucasduck";
+const char *password = "BELGICA931";
+
+//const char *ssid = "Battlebot_CAM";
+//const char *password = "12345678";
 
 void startCameraServer();
 void setupLedFlash();
-
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
   Serial.println("Iniciando programa...");
-  camera_config_t config;
+
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
   config.pin_d0 = Y2_GPIO_NUM;
@@ -60,20 +60,20 @@ void setup() {
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
-  config.frame_size = FRAMESIZE_UXGA;
+  config.xclk_freq_hz = 20000000; // cambiado, antes: de 2mill
+  config.frame_size = FRAMESIZE_QVGA; // cambiado, antes:FRAMESIZE_UXGA;
   config.pixel_format = PIXFORMAT_JPEG;  // for streaming
   //config.pixel_format = PIXFORMAT_RGB565; // for face detection/recognition
-  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-  config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.jpeg_quality = 10;
+  config.grab_mode =  CAMERA_GRAB_LATEST; // cambiado, antes: CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_location = CAMERA_FB_IN_PSRAM;// cambiado, antes: CAMERA_FB_IN_PSRAM;
+  config.jpeg_quality = 15;
   config.fb_count = 2;
 
   // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
   //                      for larger pre-allocated frame buffer.
   if (config.pixel_format == PIXFORMAT_JPEG) {
     if (psramFound()) {
-      config.jpeg_quality = 10;
+      config.jpeg_quality = 12;
       config.fb_count = 2;
       config.grab_mode = CAMERA_GRAB_LATEST;
     } else {
@@ -127,45 +127,67 @@ void setup() {
   setupLedFlash();
 #endif  
   WiFi.mode(WIFI_STA);
-  IPAddress local_IP(192, 168, 4, 2);
-  IPAddress gateway(192, 168, 4, 1);
-  IPAddress subnet(255, 255, 255, 0);
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  IPAddress local_IP(172, 20, 10, 10);
+  IPAddress gateway(172, 20, 10, 1);
+  IPAddress subnet(255, 255, 255, 240);
 
 if (!WiFi.config(local_IP, gateway, subnet)) {
   Serial.println("Error configurando IP estatica");
 }
-
+  Serial.print("Conectando a ");
+  Serial.println(ssid);
   WiFi.begin(ssid, password);
-  WiFi.setSleep(false);
+  
 
-  Serial.print("WiFi connecting");
+  unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
+
+    if (millis() - t0 > 15000) {
+      Serial.println("\nNo se pudo conectar al WiFi");
+      Serial.print("Estado WiFi: ");
+      Serial.println(WiFi.status());
+      return;
+    }
   }
+
   Serial.println("");
   Serial.println("WiFi connected");
+  Serial.print("IP asignada: ");
+  Serial.println(WiFi.localIP());
+
+  Serial.print("Gateway: ");
+  Serial.println(WiFi.gatewayIP());
+
+  Serial.print("Subnet: ");
+  Serial.println(WiFi.subnetMask());
+
+  Serial.print("RSSI: ");
+  Serial.println(WiFi.RSSI());
 
   startCameraServer();
 
   Serial.print("Camera Ready! Use 'http://");
-  Serial.print(WiFi.localIP()); //http://192.168.4.2
+  Serial.print(WiFi.localIP()); //http://172.20.10.10
   Serial.println("' to connect");
 
   // --- incializacion pantalla 
-  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    for(;;); // Don't proceed, loop forever
-  }
-  display.setRotation(2);
+ if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+   Serial.println(F("SSD1306 allocation failed"));
+   for(;;); // Don't proceed, loop forever
+ }
+ display.setRotation(2);
   
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0,0);
-  display.println("Battery Monitor");
-  display.display();
-  delay(1000);
+ display.clearDisplay();
+ display.setTextSize(1);
+ display.setTextColor(SSD1306_WHITE);
+ display.setCursor(0,0);
+ display.println("Battery Monitor");
+ display.display();
+ delay(1000);
 
 }
 
@@ -213,6 +235,6 @@ void loop() {
     display.invertDisplay(false);
   }
   display.display();
-  
   }
+   delay(10000); // lee los valores cada segundo
 }
