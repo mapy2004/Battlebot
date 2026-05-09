@@ -45,13 +45,15 @@ ControllerPtr mando = nullptr;
 
 enum ModoRobot{
   MODO_MANUAL,
-  MODO_AUTOMATICO
+  MODO_AUTOMATICO, 
+  MODO_REPOSO
 };
 enum EstadoRobot {
   ESTADO_BUSQUEDA,
   ESTADO_ATAQUE
 };
-ModoRobot modo_actual = MODO_AUTOMATICO; // modo automatico por defecto
+ModoRobot modo_actual = MODO_REPOSO; // modo REPOSO por defecto
+ModoRobot modo_anterior = MODO_REPOSO;
 EstadoRobot estado_actual = ESTADO_BUSQUEDA;
 
 void onConnectedController(ControllerPtr ctl) {
@@ -297,18 +299,26 @@ void actualizarModo() {
 
   const unsigned long TIEMPO_CAMBIO = 3000; // 3 segundos
 
-  // Si no hay mando conectado, vuelve a automático
+  // Si no hay mando conectado, vuelve a REPOSO
   if (!mando || !mando->isConnected()) {
-    if (modo_actual != MODO_AUTOMATICO) {
+    if (modo_actual != MODO_REPOSO) {
       moverMotores(0, 0);
-      modo_actual = MODO_AUTOMATICO;
-      Serial.println("Modo AUTOMATICO por defecto: mando desconectado");
+      modo_actual = MODO_REPOSO;
       sonarBuzzer(1000, 1000); //avisar del cambio de modo con buzzer
     }
-
+    modo_anterior = MODO_REPOSO; 
     tiempoInicioA = 0;
     cambioRealizado = false;
-    return;
+    Serial.println("Modo REPOSO por defecto: mando desconectado");
+    return; 
+  }else{ // si el mando esta conectado
+
+    if(modo_anterior == MODO_REPOSO){
+    modo_actual = MODO_MANUAL; //pasa a modo manual automaticamente
+    modo_anterior = MODO_MANUAL;
+    Serial.println("Modo maual al  haber mando conectado");
+    sonarBuzzer(1000, 1000); //avisar del cambio de modo con buzzer
+    }
   }
 
   // Si se pulsa A drante 3 seg se cambia al modo manual
@@ -324,10 +334,12 @@ void actualizarModo() {
 
       if (modo_actual == MODO_AUTOMATICO) {
         modo_actual = MODO_MANUAL;
+        modo_anterior = MODO_MANUAL;
         sonarBuzzer(1000, 1000); // avisar del cambio de modo con buzzer
         Serial.println("Cambio a MODO MANUAL");
       } else {
         modo_actual = MODO_AUTOMATICO;
+        modo_anterior= MODO_AUTOMATICO; 
         sonarBuzzer(1000, 1000); // avisar del cambio de modo con buzzer
         Serial.println("Cambio a MODO AUTOMATICO");
       }
@@ -349,9 +361,6 @@ void actualizarSierra() {
 
     int potenciaSierra = map(gatilloDer, 0, 1023, 0, 255); // mover sierra con gatillo derecho
     moverSierra(potenciaSierra);
-
-  } else {
-    moverSierra(50);// valor temporal sierra
   }
 }
 //==============================================================
@@ -374,8 +383,14 @@ void loop() {
   
   // --- FSM modos de funcionamiento -----
   switch(modo_actual){
+    case MODO_REPOSO:
+    moverMotores(0, 0);// motores parados
+    moverSierra(0); //sierra detenida
+    break;
+
     case MODO_AUTOMATICO:
     ModoAutomatico();
+    moverSierra(50);// mover sierra temporal
     break;
 
     case MODO_MANUAL:
