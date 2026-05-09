@@ -11,10 +11,14 @@
 #define PIN_IZQ_ATRAS    2  // LPWM Motor Izquierdo
 #define PIN_DER_ADELANTE 3  // RPWM Motor Derecho
 #define PIN_DER_ATRAS    47 // LPWM Motor Derecho
-#define PIN_SIERRA_ADELANTE 6  // RPWM SIERRA
-#define PIN_SIERRA_ATRAS    7   // LPWM SIERRA
-#define PIN_SIERRA_REN  4 // Right enable sierra
-#define PIN_SIERRA_LEN  5 // left enable sierra
+
+#define PIN_SIERRA_ADELANTE 42  // RPWM SIERRA
+#define PIN_SIERRA_ATRAS   40    // LPWM SIERRA
+#define PIN_SIERRA_REN  41 // Right enable sierra
+#define PIN_SIERRA_LEN  39 // left enable sierra
+
+#define SPEAKER 21 // pin buzzer
+#define CH_SPK  7 //canal buzzer
 
 
 // Canales PWM reservados para motores y sierra
@@ -73,22 +77,28 @@ void setup() {
   BP32.forgetBluetoothKeys();   // útil al probar emparejamientos nuevos
   Serial.println("Esperando mando Xbox...");
  // --------------------------------------------------------
+
+ //----------------------------------------------------------
+  ledcSetup(CH_SPK, 2000, 8); // canal, frecuencia, resolución
+  ledcAttachPin(SPEAKER, CH_SPK);
+  
+ //----------------------------------------------------------
   
   // ------ configuracion SIERRA --------------------------
-ledcSetup(CH_SIERRA_ADELANTE, PWM_FREQ, PWM_RES);
-ledcAttachPin(PIN_SIERRA_ADELANTE, CH_SIERRA_ADELANTE);
+  ledcSetup(CH_SIERRA_ADELANTE, PWM_FREQ, PWM_RES);
+  ledcAttachPin(PIN_SIERRA_ADELANTE, CH_SIERRA_ADELANTE);
 
-ledcSetup(CH_SIERRA_ATRAS, PWM_FREQ, PWM_RES);
-ledcAttachPin(PIN_SIERRA_ATRAS, CH_SIERRA_ATRAS);
+  ledcSetup(CH_SIERRA_ATRAS, PWM_FREQ, PWM_RES);
+  ledcAttachPin(PIN_SIERRA_ATRAS, CH_SIERRA_ATRAS);
 
-pinMode(PIN_SIERRA_REN, OUTPUT);
-pinMode(PIN_SIERRA_LEN, OUTPUT);
+  pinMode(PIN_SIERRA_REN, OUTPUT);
+  pinMode(PIN_SIERRA_LEN, OUTPUT);
 
-// habilitar driver
-digitalWrite(PIN_SIERRA_REN, HIGH);
-digitalWrite(PIN_SIERRA_LEN, HIGH);
+  // habilitar driver
+  digitalWrite(PIN_SIERRA_REN, HIGH);
+  digitalWrite(PIN_SIERRA_LEN, HIGH);
 
-moverSierra(0);
+  moverSierra(0);
 //--------------------------------------------------------
 
 
@@ -293,6 +303,7 @@ void actualizarModo() {
       moverMotores(0, 0);
       modo_actual = MODO_AUTOMATICO;
       Serial.println("Modo AUTOMATICO por defecto: mando desconectado");
+      sonarBuzzer(1000, 1000); //avisar del cambio de modo con buzzer
     }
 
     tiempoInicioA = 0;
@@ -313,9 +324,11 @@ void actualizarModo() {
 
       if (modo_actual == MODO_AUTOMATICO) {
         modo_actual = MODO_MANUAL;
+        sonarBuzzer(1000, 1000); // avisar del cambio de modo con buzzer
         Serial.println("Cambio a MODO MANUAL");
       } else {
         modo_actual = MODO_AUTOMATICO;
+        sonarBuzzer(1000, 1000); // avisar del cambio de modo con buzzer
         Serial.println("Cambio a MODO AUTOMATICO");
       }
 
@@ -355,10 +368,6 @@ const int PWM_BUSQUEDA = 120;
 const int AREA_MINIMA_ATAQUE = 250;  
 
 void loop() {
-  //if (modo_actual == MODO_MANUAL) {
-  //BP32.update();
-  //leerMando();
-  //}
   BP32.update();
   leerMando(); //  lectura mando bluetooth 
   actualizarModo(); // cambiar modo funcionamiento
@@ -373,9 +382,9 @@ void loop() {
     ModoManual();
     break;
   }
-
-  actualizarSierra(); // mover sierra
-  delay(100); // pequeño delay para no saturar el loop
+  actualizarSierra(); // mover sierra siempre
+  actualizarSonidoEstado();
+  actualizarBuzzer();
 }
 
 //======= funcion modo manual ============================
@@ -446,12 +455,13 @@ void ModoAutomatico(){
   unsigned long tiempo_fotograma = tiempo_fin - tiempo_inicio;
   float fps = 1000.0 / tiempo_fotograma;
 
-  Serial.println("\n--- TELEMETRÍA DE COMBATE ---");
-  Serial.printf("[SISTEMA] Rendimiento: %.1f FPS (%.0f ms por frame)\n", fps, (float)tiempo_fotograma);
+ // Serial.println("\n--- TELEMETRÍA DE COMBATE ---");
+ // Serial.printf("[SISTEMA] Rendimiento: %.1f FPS (%.0f ms por frame)\n", fps, (float)tiempo_fotograma);
 
   // MFS Y NAVEGACIÓN
   // Filtro adaptado al subsampling
- if (m00 > AREA_MINIMA_ATAQUE) {
+  // ------- ESTADO DE ATAQUE -------
+ if (m00 > AREA_MINIMA_ATAQUE) { 
     estado_actual = ESTADO_ATAQUE;
     int centro_x = m10 / m00;
     ultima_X_conocida = centro_x; 
@@ -469,7 +479,8 @@ void ModoAutomatico(){
     moverMotores(pwm_izq, pwm_der);
 
     Serial.printf("[ATAQUE] X:%d | Area:%ld | L:%d R:%d\n", centro_x, m00, pwm_izq, pwm_der);
-    
+
+    // ------- ESTADO DE BUSQUEDA -------
   } else {
     estado_actual = ESTADO_BUSQUEDA;
 
@@ -497,4 +508,71 @@ void ModoAutomatico(){
 
   esp_camera_fb_return(fb);
 
+}
+
+//=========== funciones SONIDO BUZZER =====================
+bool buzzerActivo = false;
+unsigned long tiempoInicioBuzzer = 0;
+unsigned long duracionBuzzer = 0;
+void sonarBuzzer(int frecuencia, unsigned long duracion){
+
+  ledcWriteTone(CH_SPK, frecuencia);
+
+  tiempoInicioBuzzer = millis();
+
+  duracionBuzzer = duracion;
+
+  buzzerActivo = true;
+
+}
+
+void actualizarBuzzer(){
+
+  if(buzzerActivo){
+
+    if(millis() - tiempoInicioBuzzer >= duracionBuzzer){
+
+      ledcWriteTone(CH_SPK, 0);
+
+      buzzerActivo = false;
+
+    }
+  }
+}
+// ================================================================================
+
+
+// ========= SONIDO SEGÚN ESTADO ============================================
+
+unsigned long ultimoPitidoEstado = 0;
+
+void actualizarSonidoEstado() {
+
+  if (modo_actual != MODO_AUTOMATICO) {
+    ultimoPitidoEstado = millis();
+    return;
+  }
+
+  unsigned long intervalo;
+  unsigned long duracion;
+  int frecuencia;
+
+  if (estado_actual == ESTADO_BUSQUEDA) {
+    frecuencia = 1500;
+    intervalo = 800;
+    duracion = 80;
+  }
+  else if (estado_actual == ESTADO_ATAQUE) {
+    frecuencia = 1500;
+    intervalo = 200;
+    duracion = 80;
+  }
+  else {
+    return;
+  }
+
+  if (millis() - ultimoPitidoEstado >= intervalo) {
+    sonarBuzzer(frecuencia, duracion);
+    ultimoPitidoEstado = millis();
+  }
 }
