@@ -75,7 +75,7 @@ void setup() {
   delay(3000); 
 
  // ------- creacion conexion bluetooth -------------------
-   BP32.setup(&onConnectedController, &onDisconnectedController);
+  BP32.setup(&onConnectedController, &onDisconnectedController);
   BP32.forgetBluetoothKeys();   // útil al probar emparejamientos nuevos
   Serial.println("Esperando mando Xbox...");
  // --------------------------------------------------------
@@ -421,6 +421,30 @@ void ModoManual(){
 }
 // ========================================================
 
+
+// ======================================================================
+// COMPENSACIÓN DINÁMICA DE PARALAJE (Cámara 95mm a la IZQUIERDA del morro)
+// ======================================================================
+int calcularCentroDinamico(long area_actual) {
+  // map(valor, fromLow, fromHigh, toLow, toHigh)
+  // area_actual: la cantidad de fucsia que vemos
+  // 250: área cuando el bote está lejos
+  // 5000: área cuando el bote está a punto de impactar
+  // 10: píxeles de desvío a la derecha cuando está lejos
+  // 80: píxeles de desvío a la derecha cuando está muy cerca
+  
+  int offset_pixeles = map(area_actual, 250, 5000, 10, 80);
+  
+  // Ponemos un tope para que la matemática no se vuelva loca en impactos
+  offset_pixeles = constrain(offset_pixeles, 10, 80); 
+  
+  // SUMAMOS el offset porque queremos que el objetivo quede a la DERECHA 
+  // del centro de la cámara (160)
+  return 160 + offset_pixeles; 
+}
+// ======================================================================
+
+
 // ======= funcion del modo automatico ============================
 void ModoAutomatico(){
 
@@ -481,7 +505,13 @@ void ModoAutomatico(){
     int centro_x = m10 / m00;
     ultima_X_conocida = centro_x; 
 
-    int error_x = centro_x - CENTRO_CAMARA_X;
+    // --- NUEVO: PUNTO DE MIRA DINÁMICO ---
+    int CENTRO_DINAMICO = calcularCentroDinamico(m00);
+
+    // Calculamos el error contra el nuevo centro corregido (que estará entre 170 y 240)
+    int error_x = centro_x - CENTRO_DINAMICO;
+    // -------------------------------------
+
     float correccion_giro = error_x * Kp_CURVATURA; 
 
     int velocidad_ataque = PWM_BASE_MAX;
