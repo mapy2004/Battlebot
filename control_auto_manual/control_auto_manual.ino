@@ -390,7 +390,7 @@ void loop() {
 
     case MODO_AUTOMATICO:
     ModoAutomatico();
-    moverSierra(50);// mover sierra temporal
+    
     break;
 
     case MODO_MANUAL:
@@ -522,13 +522,13 @@ void ModoAutomatico(){
     int pwm_der = velocidad_ataque - correccion_giro;
     
     moverMotores(pwm_izq, pwm_der);
-
+    moverSierra(255);
     Serial.printf("[ATAQUE] X:%d | Area:%ld | L:%d R:%d\n", centro_x, m00, pwm_izq, pwm_der);
 
     // ------- ESTADO DE BUSQUEDA -------
   } else {
     estado_actual = ESTADO_BUSQUEDA;
-
+      moverSierra(0);
     int pwm_izq = 0;
     int pwm_der = 0;
     

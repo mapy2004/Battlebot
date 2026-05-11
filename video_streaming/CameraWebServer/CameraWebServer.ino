@@ -5,13 +5,16 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "board_config.h"
+#include <DHT.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 32
 #define OLED_RESET    -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
 
-
+#define DHTPIN 40
+#define DHTTYPE DHT11   
+DHT dht(DHTPIN, DHTTYPE);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 unsigned long Vm_startMillis = 0;  //some global variables available anywhere in the program
@@ -22,6 +25,7 @@ const int analogPin = 14; // salida div resistivo bateria
 const float dividerRatio = 0.244; // Your measured ratio
 const float refVoltage = 3.3;     // Measure your 3V3 pin and update this for 100% accuracy
 
+float temperatura = 0;   // variable global temperatura
 camera_config_t config;
 
 // ===========================
@@ -36,7 +40,7 @@ const char *password = "BELGICA931";
 
 void startCameraServer();
 void setupLedFlash();
-
+void leerTemperatura();
 //======= funcion saca porcentaje bateria ================
 float getBatteryPercent(float batteryVoltage){
   float cellVoltage = batteryVoltage / 3.0; // LiPo 3S
@@ -51,6 +55,7 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
+  dht.begin(); // iniciar sensor temp
   Serial.println("Iniciando programa...");
 
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -219,6 +224,9 @@ void loop() {
   {
 
    Vm_startMillis = millis();
+
+   // medir temp 
+   leerTemperatura();
   // 1. Calculate Voltage
   // hacer una media de las lecturas
   long sum = 0;
@@ -239,9 +247,12 @@ void loop() {
   Serial.print(" V | batteryVoltage = ");
   Serial.print(batteryVoltage);
   Serial.println(" V");
-
+  Serial.print("Temperatura: ");
+  Serial.print(temperatura);
   // 2. Update Display
   display.clearDisplay();
+
+  
 
   display.setTextSize(1);
   display.setCursor(0, 0);
@@ -249,10 +260,15 @@ void loop() {
   display.print(batteryVoltage, 2);
   display.println(" V");
 
-  display.setCursor(0, 12);
-  display.print("Battery: ");
-  display.print(batteryPercent, 0);
-  display.println(" %");
+  display.setCursor(0,12);
+  display.print("Temp: ");
+  display.print(temperatura);
+  display.print(" C");
+
+  //display.setCursor(0, 12);
+ // display.print("Battery: ");
+ // display.print(batteryPercent, 0);
+ // display.println(" %");
 
   display.setTextSize(1);
   display.setCursor(0, 24);
@@ -264,9 +280,20 @@ void loop() {
     display.print("Status: OK");
     display.invertDisplay(false);
   }
-
+  
   display.display();
   }
+}
+
+
+void leerTemperatura() {
+
+  float t = dht.readTemperature();
+
+  if (!isnan(t)) {
+    temperatura = t;
+  }
+
 }
 
 
