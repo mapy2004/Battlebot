@@ -32,8 +32,8 @@ camera_config_t config;
 // Enter your WiFi credentials
 // ===========================
 
-const char *ssid = "iphone_de_lucasduck";
-const char *password = "BELGICA931";
+const char *ssid = "Mapy";
+const char *password = "cebollin";
 
 //const char *ssid = "Battlebot_CAM";
 //const char *password = "12345678";
