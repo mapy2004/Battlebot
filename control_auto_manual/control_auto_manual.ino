@@ -2,15 +2,16 @@
 #include "board_config.h"
 #include <WiFi.h>
 #include <Bluepad32.h>
-
+#include <esp_now.h>
+#include "esp_wifi.h"
 
 // =======================================================
 // CONFIGURACIÓN DE PINES BTS7960 (100% SEGUROS)
 // =======================================================
-#define PIN_IZQ_ADELANTE 1  // RPWM Motor Izquierdo
-#define PIN_IZQ_ATRAS    2  // LPWM Motor Izquierdo
-#define PIN_DER_ADELANTE 3  // RPWM Motor Derecho
-#define PIN_DER_ATRAS    47 // LPWM Motor Derecho
+#define PIN_IZQ_ADELANTE 3  // RPWM Motor Izquierdo
+#define PIN_IZQ_ATRAS    47  // LPWM Motor Izquierdo
+#define PIN_DER_ADELANTE 1  // RPWM Motor Derecho
+#define PIN_DER_ATRAS    2 // LPWM Motor Derecho
 
 #define PIN_SIERRA_ADELANTE 42  // RPWM SIERRA
 #define PIN_SIERRA_ATRAS   40    // LPWM SIERRA
@@ -34,11 +35,30 @@
 
 // --- MEDIDOR DE FPS ---
 unsigned long tiempo_ultimo_fotograma = 0;
-// ----------------------
 
-// ----- credenciales punto WIFI -------
-const char* ssid = "Battlebot_CAM";
-const char* password = "12345678";
+//---- ESP-NOW ---------------------------------
+const int CANAL_ESPNOW = 6; // canal ESP-NOW
+typedef struct {
+  bool avisoBateriaBaja;
+} MensajeAviso;
+
+MensajeAviso avisoRecibido;
+bool bateriaBaja = false;
+unsigned long ultimoAvisoBateria = 0;
+
+// ======= funcion recepcion ESP-NOW =======================
+void recibirAvisoBateria(const uint8_t *mac, const uint8_t *data, int len) {
+  if (len == sizeof(MensajeAviso)) {
+    memcpy(&avisoRecibido, data, sizeof(avisoRecibido));
+
+    if (avisoRecibido.avisoBateriaBaja) {
+      bateriaBaja = true;
+      ultimoAvisoBateria = millis();
+
+      Serial.println("AVISO RECIBIDO: BATERIA BAJA");
+    }
+  }
+}
 
 // ======= funciones conexion bluetooth mando =============
 ControllerPtr mando = nullptr;
@@ -156,8 +176,28 @@ void setup() {
 
   s->set_brightness(s, -1);    
   s->set_contrast(s, 1); 
-  //--------------------------------------------------------------     
+  //-------------------------------------------------------------- 
+  // ----- configuracion ESP-NOW ---
+  WiFi.mode(WIFI_STA);
+
+  esp_wifi_set_promiscuous(true);
+  esp_wifi_set_channel(CANAL_ESPNOW, WIFI_SECOND_CHAN_NONE);
+  esp_wifi_set_promiscuous(false);
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error iniciando ESP-NOW en ESP principal");
+    return;
+  }
+
+  esp_now_register_recv_cb(recibirAvisoBateria);
+
+  Serial.println("ESP-NOW receptor iniciado en ESP principal");
+
+
 }
+
+
+
 
 //========= Función de control de potencia bruta de motores ==========
 void moverMotores(int velIzq, int velDer) {
@@ -254,27 +294,6 @@ if (mando && mando->isConnected()) {
     gatilloDer = mando->throttle();
     gatilloIzq = mando->brake();
 
-
-    // comprobacion
-   // Serial.print("X: ");
-   // Serial.print(joystickX);
-
-    //Serial.print("  Y: ");
-    //Serial.print(joystickY);
-
-    //Serial.print("  A: ");
-    //Serial.print(botonA);
-
-    //Serial.print("  B: ");
-    //Serial.println(botonB);
-
-    //Serial.print("  gatillo derecho: ");
-    //Serial.println(gatilloDer);
-
-    //Serial.print("  gatillo izquierdo: ");
-    //Serial.println(gatilloIzq);
-
-
   }else {
 
     joystickX = 0;
@@ -299,8 +318,8 @@ void actualizarModo() {
 
   const unsigned long TIEMPO_CAMBIO = 3000; // 3 segundos
 
-  // Si no hay mando conectado, vuelve a REPOSO
-  if (!mando || !mando->isConnected()) {
+  // Si no hay mando conectado,o la bateria es baja, vuelve a REPOSO
+  if (!mando || !mando->isConnected()|| bateriaBaja ) {
     if (modo_actual != MODO_REPOSO) {
       moverMotores(0, 0);
       modo_actual = MODO_REPOSO;
@@ -309,14 +328,14 @@ void actualizarModo() {
     modo_anterior = MODO_REPOSO; 
     tiempoInicioA = 0;
     cambioRealizado = false;
-    Serial.println("Modo REPOSO por defecto: mando desconectado");
+    //Serial.println("Modo REPOSO por defecto: mando desconectado");
     return; 
   }else{ // si el mando esta conectado
 
     if(modo_anterior == MODO_REPOSO){
     modo_actual = MODO_MANUAL; //pasa a modo manual automaticamente
     modo_anterior = MODO_MANUAL;
-    Serial.println("Modo maual al  haber mando conectado");
+    //Serial.println("Modo maual al  haber mando conectado");
     sonarBuzzer(1000, 1000); //avisar del cambio de modo con buzzer
     }
   }
@@ -336,12 +355,12 @@ void actualizarModo() {
         modo_actual = MODO_MANUAL;
         modo_anterior = MODO_MANUAL;
         sonarBuzzer(1000, 1000); // avisar del cambio de modo con buzzer
-        Serial.println("Cambio a MODO MANUAL");
+        //Serial.println("Cambio a MODO MANUAL");
       } else {
         modo_actual = MODO_AUTOMATICO;
         modo_anterior= MODO_AUTOMATICO; 
         sonarBuzzer(1000, 1000); // avisar del cambio de modo con buzzer
-        Serial.println("Cambio a MODO AUTOMATICO");
+        //Serial.println("Cambio a MODO AUTOMATICO");
       }
 
       cambioRealizado = true;
@@ -373,7 +392,7 @@ int ultima_X_conocida = 160;
 const int CENTRO_CAMARA_X = 160; 
 const float Kp_CURVATURA = 1.2; 
 const int PWM_BASE_MAX = 255;   
-const int PWM_BUSQUEDA = 120;   
+const int PWM_BUSQUEDA = 200;   
 const int AREA_MINIMA_ATAQUE = 250;  
 
 void loop() {
@@ -403,13 +422,23 @@ void loop() {
 }
 
 //======= funcion modo manual ============================
-void ModoManual(){
+void ModoManual() {
 
   int avance = joystickY;
-  int giro   = joystickX;
+  int giro = joystickX;
 
+  // Invertir giro cuando va marcha atrás
+  if (avance < 0) {
+    giro = -giro;
+  }
+  
   int velIzq = avance + giro;
   int velDer = avance - giro;
+  int maxVal = max(abs(velIzq), abs(velDer));
+  if (maxVal > 512) {
+    velIzq = velIzq * 512 / maxVal;
+    velDer = velDer * 512 / maxVal;
+  }
 
   velIzq = constrain(velIzq, -512, 512);
   velDer = constrain(velDer, -512, 512);
@@ -448,7 +477,7 @@ int calcularCentroDinamico(long area_actual) {
 // ======= funcion del modo automatico ============================
 void ModoAutomatico(){
 
-    Serial.println("Entrando en ModoAutomatico");
+   // Serial.println("Entrando en ModoAutomatico");
   unsigned long tiempo_inicio = millis();
 // --------- lectura color camara -------------
   camera_fb_t *fb = esp_camera_fb_get();
@@ -535,17 +564,17 @@ void ModoAutomatico(){
     if (ultima_X_conocida < CENTRO_CAMARA_X - 20) {
       pwm_izq = -PWM_BUSQUEDA; 
       pwm_der = PWM_BUSQUEDA;  
-      Serial.println("[BUSQUEDA] Rotando a la IZQUIERDA");
+     // Serial.println("[BUSQUEDA] Rotando a la IZQUIERDA");
       
     } else if (ultima_X_conocida > CENTRO_CAMARA_X + 20) {
       pwm_izq = PWM_BUSQUEDA;  
       pwm_der = -PWM_BUSQUEDA; 
-      Serial.println("[BUSQUEDA] Rotando a la DERECHA");
+     // Serial.println("[BUSQUEDA] Rotando a la DERECHA");
       
     } else {
       pwm_izq = PWM_BUSQUEDA;
       pwm_der = -PWM_BUSQUEDA;
-      Serial.println("[BUSQUEDA] Rotando a la DERECHA (Default)");
+    //  Serial.println("[BUSQUEDA] Rotando a la DERECHA (Default)");
     }
 
     moverMotores(pwm_izq, pwm_der);
@@ -621,3 +650,5 @@ void actualizarSonidoEstado() {
     ultimoPitidoEstado = millis();
   }
 }
+
+

@@ -6,6 +6,7 @@
 #include <Adafruit_SSD1306.h>
 #include "board_config.h"
 #include <DHT.h>
+#include <esp_now.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 32
@@ -24,10 +25,16 @@ const unsigned long Vm_period = 1000;
 const int analogPin = 14; // salida div resistivo bateria
 const float dividerRatio = 0.244; // Your measured ratio
 const float refVoltage = 3.3;     // Measure your 3V3 pin and update this for 100% accuracy
-
+const float UMBRAL_BATERIA_BAJA = 10;
 float temperatura = 0;   // variable global temperatura
 camera_config_t config;
-
+//------- variables ESP-NOW -------------
+uint8_t macESPPrincipal[] = {0xE8, 0xF6, 0x0A, 0x89, 0xDC, 0x1C};
+typedef struct {
+  bool avisoBateriaBaja;
+} MensajeAviso;
+MensajeAviso aviso;
+bool avisoBateriaEnviado = false;
 // ===========================
 // Enter your WiFi credentials
 // ===========================
@@ -35,12 +42,10 @@ camera_config_t config;
 const char *ssid = "iphone_de_lucasduck";
 const char *password = "BELGICA931";
 
-//const char *ssid = "Battlebot_CAM";
-//const char *password = "12345678";
 
 void startCameraServer();
 void setupLedFlash();
-void leerTemperatura();
+//void leerTemperatura();
 //======= funcion saca porcentaje bateria ================
 float getBatteryPercent(float batteryVoltage){
   float cellVoltage = batteryVoltage / 3.0; // LiPo 3S
@@ -51,6 +56,25 @@ float getBatteryPercent(float batteryVoltage){
   return (cellVoltage - 3.30) * 100.0 / (4.20 - 3.30);
 }
 //=========================================================
+
+// ====== funcion envio de datos ESP-NOW =====================
+void enviarAvisoBateriaBaja() {
+
+  aviso.avisoBateriaBaja = true;
+
+  esp_err_t resultado = esp_now_send(
+    macESPPrincipal,
+    (uint8_t *) &aviso,
+    sizeof(aviso)
+  );
+
+  if (resultado == ESP_OK) {
+    Serial.println("Aviso de bateria baja enviado");
+  } else {
+    Serial.println("Error enviando aviso");
+  }
+}
+//============================================================
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
@@ -118,6 +142,7 @@ void setup() {
   }
 
   sensor_t *s = esp_camera_sensor_get();
+  s->set_hmirror(s, 1); // espejo horizontal
   // initial sensors are flipped vertically and colors are a bit saturated
   if (s->id.PID == OV3660_PID) {
     s->set_vflip(s, 1);        // flip it back
@@ -213,6 +238,31 @@ if (!WiFi.config(local_IP, gateway, subnet)) {
   pinMode(analogPin, INPUT);
 
 
+// ===== INICIALIZACION ESP-NOW =====
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error iniciando ESP-NOW");
+    return;
+  }
+
+  esp_now_peer_info_t peerInfo = {};
+
+  memcpy(peerInfo.peer_addr, macESPPrincipal, 6);
+  Serial.print("Canal WiFi actual: ");
+  Serial.println(WiFi.channel());
+  peerInfo.channel = WiFi.channel();
+
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Error añadiendo peer");
+    return;
+  }
+
+  Serial.println("ESP-NOW iniciado en ESP secundario");
+
+
+
   delay(1000);
 
 }
@@ -226,7 +276,7 @@ void loop() {
    Vm_startMillis = millis();
 
    // medir temp 
-   leerTemperatura();
+  // leerTemperatura();
   // 1. Calculate Voltage
   // hacer una media de las lecturas
   long sum = 0;
@@ -235,11 +285,11 @@ void loop() {
     delay(2);
   }
   int rawValue = sum / 20;
-  //int rawValue = analogRead(analogPin);
   float pinVoltage = (rawValue / 4095.0) * refVoltage;
   float batteryVoltage = pinVoltage / dividerRatio;
-  
   float batteryPercent = getBatteryPercent(batteryVoltage);
+
+
   Serial.print("rawValue = ");
   Serial.print(rawValue);
   Serial.print(" | pinVoltage = ");
@@ -247,8 +297,8 @@ void loop() {
   Serial.print(" V | batteryVoltage = ");
   Serial.print(batteryVoltage);
   Serial.println(" V");
-  Serial.print("Temperatura: ");
-  Serial.print(temperatura);
+  //Serial.print("Temperatura: ");
+  //Serial.print(temperatura);
   // 2. Update Display
   display.clearDisplay();
 
@@ -260,74 +310,33 @@ void loop() {
   display.print(batteryVoltage, 2);
   display.println(" V");
 
-  display.setCursor(0,12);
-  display.print("Temp: ");
-  display.print(temperatura);
-  display.print(" C");
+  // display.setCursor(0,12);
+  // display.print("Temperatura: ");
+  // display.print(temperatura);
+  // display.print(" C");
 
-  //display.setCursor(0, 12);
- // display.print("Battery: ");
- // display.print(batteryPercent, 0);
- // display.println(" %");
+  display.setTextSize(1);
+  display.setCursor(0, 12);
+  display.print("Battery: ");
+  display.print(batteryPercent, 0);
+  display.println(" %");
 
   display.setTextSize(1);
   display.setCursor(0, 24);
-
-  if (batteryVoltage < 10.8) {
-    display.print("LOW BATTERY!");
+  if (batteryVoltage < UMBRAL_BATERIA_BAJA ) {
+    display.print("LOW BATTERY!");   
     display.invertDisplay(true);
+
+    if (!avisoBateriaEnviado){
+        enviarAvisoBateriaBaja();
+      avisoBateriaEnviado = true;
+    }
   } else {
-    display.print("Status: OK");
     display.invertDisplay(false);
+    display.print("STATUS OK");
   }
   
   display.display();
   }
 }
 
-
-void leerTemperatura() {
-
-  float t = dht.readTemperature();
-
-  if (!isnan(t)) {
-    temperatura = t;
-  }
-
-}
-
-
-// ------ PRUEBA PANTALLA ---------
-// #include <Wire.h>
-// #include <Adafruit_GFX.h>
-// #include <Adafruit_SSD1306.h>
-
-// #define SCREEN_WIDTH 128
-// #define SCREEN_HEIGHT 32
-// #define OLED_RESET -1
-// #define SCREEN_ADDRESS 0x3C
-
-// Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-// void setup() {
-//   Serial.begin(115200);
-
-//   Wire.begin(5, 6);  // SDA = GPIO5, SCL = GPIO6
-
-//   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-//     Serial.println("OLED no detectada");
-//     while (true);
-//   }
-
-//   display.clearDisplay();
-//   display.setTextSize(1);
-//   display.setTextColor(SSD1306_WHITE);
-//   display.setCursor(0, 0);
-//   display.println("TEST");
-//   display.println("CABRON");
-//   display.display();
-
-//   Serial.println("OLED OK");
-// }
-
-// void loop() {}
