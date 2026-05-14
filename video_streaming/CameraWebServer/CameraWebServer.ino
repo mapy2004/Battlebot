@@ -39,8 +39,8 @@ bool avisoBateriaEnviado = false;
 // Enter your WiFi credentials
 // ===========================
 
-const char *ssid = "iphone_de_lucasduck";
-const char *password = "BELGICA931";
+const char *ssid = "Mapy";
+const char *password = "cebollin";
 
 
 void startCameraServer();
